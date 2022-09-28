@@ -1,7 +1,5 @@
 use std::net::SocketAddr;
 
-use std::convert::TryFrom;
-use wasmedge_http_req::{request::{Request as WasmEdgeRequest, Method as WasmEdgeMethod, HttpVersion}, uri::Uri};
 use hyper::server::conn::Http;
 use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, StatusCode};
@@ -9,7 +7,19 @@ use tokio::net::TcpListener;
 
 use image::{ImageFormat, ImageOutputFormat};
 
-async fn grayscale(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+impl From<Hyper::Error> for CliError {
+    fn from(err: Hyper::Error) -> CliError {
+        CliError::Hyper(err)
+    }
+}
+
+impl From<reqwest::Error> for CliError {
+    fn from(err: reqwest::Error) -> CliError {
+        CliError::Reqwest(err)
+    }
+}
+
+async fn grayscale(req: Request<Body>) -> Result<Response<Body>, CliError> {
     match (req.method(), req.uri().path()) {
         // Serve some instructions at /
         (&Method::GET, "/") => Ok(Response::new(Body::from(
@@ -45,22 +55,22 @@ async fn grayscale(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
         ))),
 
         (&Method::POST, "/v1.0/state/statestore") => {
-            let _uri = Uri::try_from("http://localhost:3503/v1.0/state/statestore").unwrap();
-            let mut writer = Vec::new(); //container for body of a response
-            let whole_body: &[u8] = &hyper::body::to_bytes(req.into_body()).await?;
-            // println!("{:?}", String::from_utf8_lossy(whole_body));
+            let url = "http://localhost:3503/v1.0/state/statestore";
+            let post_body_str = r#"[{ "key": "name", "value": "Bruce Wayne"}]"#;
 
-            let res = WasmEdgeRequest::new(&_uri)
-                .method(WasmEdgeMethod::POST)
-                .version(HttpVersion::Http11)
-                .header("Content-Length", &whole_body.len())
+            let client = reqwest::Client::new();
+
+            let res = client
+                .post("http://localhost:3503/v1.0/state/statestore")
+                .body(post_body_str)
+                .header("Content-Length", post_body_str.len())
                 .header("Content-Type", "application/json")
-                .body(whole_body)
-                .send(&mut writer)
-                .unwrap();
+                .send()
+                .await?;
+            let body = res.text().await?;
             
-            println!("{:?}", String::from_utf8_lossy(&writer));
-
+            println!("POST: {}", body);
+            
             Ok(Response::new(Body::from("OK")))
         }
 
